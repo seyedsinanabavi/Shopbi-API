@@ -2,6 +2,9 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Widgets\LatestComments;
+use App\Filament\Widgets\LatestPosts;
+use App\Filament\Widgets\StatsOverview;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -27,9 +30,31 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('admin')
             ->login()
+
+            // برندینگ
+            ->brandName('پنل مدیریت سایت')
+            ->favicon(asset('favicon.ico'))
+            ->font('Vazirmatn')
+
+            // رنگ‌ها
             ->colors([
-                'primary' => Color::Amber,
+                'primary' => Color::Blue,
+                'danger'  => Color::Red,
+                'success' => Color::Green,
+                'warning' => Color::Amber,
+                'info'    => Color::Sky,
             ])
+
+
+            ->sidebarCollapsibleOnDesktop()
+            ->sidebarWidth('17rem')
+
+            ->navigationGroups([
+                'مدیریت محتوا',
+                'مدیریت کاربران',
+                'تنظیمات',
+            ])
+
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')
             ->pages([
@@ -37,8 +62,10 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\\Filament\\Widgets')
             ->widgets([
+                StatsOverview::class,
+                LatestPosts::class,
+                LatestComments::class,
                 Widgets\AccountWidget::class,
-                Widgets\FilamentInfoWidget::class,
             ])
             ->middleware([
                 EncryptCookies::class,
