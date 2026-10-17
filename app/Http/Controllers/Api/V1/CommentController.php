@@ -3,63 +3,84 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\V1\Comment\StoreCommentRequest;
+use App\Http\Resources\Api\V1\CommentResource;
+use App\Models\Comment;
+use App\Models\Post;
+use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
 
 class CommentController extends Controller
 {
+    use ApiResponse;
+
     /**
-     * Display a listing of the resource.
+     * لیست کامنت‌های یک مقاله
      */
-    public function index()
+    public function index(Request $request, Post $post)
     {
-        //
+        $comments = $post->comments()
+            ->approved()
+            ->roots()
+            ->with(['user', 'children' => function ($q) {
+                $q->approved()->with('user')->oldest();
+            }])
+            ->latest()
+            ->paginate(15);
+
+        return $this->paginatedResponse($comments, CommentResource::class);
     }
 
     /**
-     * Show the form for creating a new resource.
+     * ثبت کامنت جدید
      */
-    public function create()
+    public function store(StoreCommentRequest $request, Post $post)
     {
-        //
+        $user = $request->user();
+
+        if (!$user) {
+            return $this->errorResponse('ابتدا وارد حساب خود شوید', 401);
+        }
+
+        // ✅ استفاده از validated()
+        $data = $request->validated();
+
+        $comment = Comment::create([
+            'post_id'    => $post->getKey(),
+            'user_id'    => $user->getKey(),
+            'parent_id'  => $data['parent_id'] ?? null,
+            'content'    => $data['content'],
+            'status'     => 'pending',
+            'ip_address' => $request->ip(),
+        ]);
+
+        $comment->load('user');
+
+        return $this->successResponse(
+            new CommentResource($comment),
+            'کامنت شما ثبت شد و پس از تأیید نمایش داده می‌شود',
+            201
+        );
     }
 
     /**
-     * Store a newly created resource in storage.
+     * حذف کامنت
      */
-    public function store(Request $request)
+    public function destroy(Request $request, Comment $comment)
     {
-        //
-    }
+        $user = $request->user();
 
-    /**
-     * Display the specified resource.
-     */
-    public function show(string $id)
-    {
-        //
-    }
+        if (!$user) {
+            return $this->errorResponse('ابتدا وارد حساب خود شوید', 401);
+        }
 
-    /**
-     * Show the form for editing the specified resource.
-     */
-    public function edit(string $id)
-    {
-        //
-    }
+        if ($comment->getAttribute('user_id') !== $user->getKey()
+            && !$user->hasAnyRole(['admin', 'editor'])) {
+            return $this->errorResponse('شما مجاز به حذف این کامنت نیستید', 403);
+        }
 
-    /**
-     * Update the specified resource in storage.
-     */
-    public function update(Request $request, string $id)
-    {
-        //
-    }
+        $comment->delete();
 
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy(string $id)
-    {
-        //
+        return $this->noContentResponse('کامنت با موفقیت حذف شد');
     }
 }

@@ -19,9 +19,7 @@ class PostController extends Controller
 
     public function __construct(
         protected MediaService $mediaService
-    ) {
-        // ❌ middleware حذف شد — توی Route تعریف میشه
-    }
+    ) {}
 
     /**
      * لیست مقالات
@@ -32,24 +30,28 @@ class PostController extends Controller
             ->with(['user', 'category', 'tags'])
             ->published();
 
+        // فیلتر دسته
         if ($request->filled('category')) {
             $query->whereHas('category', fn($q) =>
-                $q->where('slug', $request->category)
+                $q->where('slug', $request->input('category'))
             );
         }
 
+        // فیلتر برچسب
         if ($request->filled('tag')) {
             $query->whereHas('tags', fn($q) =>
-                $q->where('slug', $request->tag)
+                $q->where('slug', $request->input('tag'))
             );
         }
 
+        // فیلتر نوع
         if ($request->filled('type')) {
-            $query->where('type', $request->type);
+            $query->where('type', $request->input('type'));
         }
 
+        // جستجو
         if ($request->filled('search')) {
-            $search = $request->search;
+            $search = $request->input('search');
             $query->where(function ($q) use ($search) {
                 $q->where('title', 'LIKE', "%{$search}%")
                   ->orWhere('content', 'LIKE', "%{$search}%")
@@ -57,6 +59,7 @@ class PostController extends Controller
             });
         }
 
+        // مرتب‌سازی
         $sort = $request->input('sort', 'latest');
         match ($sort) {
             'oldest'   => $query->oldest('published_at'),
@@ -65,6 +68,7 @@ class PostController extends Controller
             default    => $query->latest('published_at'),
         };
 
+        // صفحه‌بندی
         $perPage = min((int) $request->input('per_page', 15), 50);
         $posts = $query->paginate($perPage);
 
@@ -72,20 +76,22 @@ class PostController extends Controller
     }
 
     /**
-     * نمایش یک مقاله
+     * نمایش مقاله
      */
     public function show(Request $request, Post $post)
     {
+        // اگه منتشر نشده، فقط صاحب/ادمین ببینه
         if (!$post->is_published) {
             $user = $request->user();
             if (!$user ||
-                ($user->id !== $post->user_id &&
+                ($user->getKey() !== $post->getAttribute('user_id') &&
                  !$user->hasAnyRole(['admin', 'editor']))) {
                 return $this->errorResponse('مقاله یافت نشد', 404);
             }
         }
 
-        $cacheKey = "post_viewed:{$post->id}:" . $request->ip();
+        // افزایش بازدید (کش شده)
+        $cacheKey = "post_viewed:{$post->getKey()}:" . $request->ip();
         if (!cache()->has($cacheKey)) {
             $post->incrementViews();
             cache()->put($cacheKey, true, now()->addHours(6));
@@ -100,50 +106,62 @@ class PostController extends Controller
     }
 
     /**
-     * ساخت مقاله جدید
+     * ساخت مقاله
      */
     public function store(StorePostRequest $request)
     {
+        $user = $request->user();
+
+        if (!$user) {
+            return $this->errorResponse('ابتدا وارد حساب خود شوید', 401);
+        }
+
         try {
-            $post = DB::transaction(function () use ($request) {
+            $post = DB::transaction(function () use ($request, $user) {
+                $data = $request->validated();
+
                 $post = Post::create([
-                    'user_id'          => $request->user()->id,
-                    'category_id'      => $request->category_id,
-                    'title'            => $request->title,
-                    'content'          => $request->content,
-                    'excerpt'          => $request->excerpt,
-                    'type'             => $request->input('type', 'post'),
-                    'status'           => $request->input('status', 'draft'),
-                    'published_at'     => $request->published_at,
-                    'scheduled_at'     => $request->scheduled_at,
-                    'meta_title'       => $request->meta_title,
-                    'meta_description' => $request->meta_description,
-                    'meta_keywords'    => $request->meta_keywords,
-                    'canonical_url'    => $request->canonical_url,
-                    'og_title'         => $request->og_title,
-                    'og_description'   => $request->og_description,
-                    'twitter_card'     => $request->input('twitter_card', 'summary_large_image'),
-                    'is_indexable'     => $request->input('is_indexable', true),
-                    'is_followable'    => $request->input('is_followable', true),
-                    'schema_markup'    => $request->schema_markup,
+                    'user_id'          => $user->getKey(),
+                    'category_id'      => $data['category_id'] ?? null,
+                    'title'            => $data['title'],
+                    'content'          => $data['content'],
+                    'excerpt'          => $data['excerpt'] ?? null,
+                    'type'             => $data['type'] ?? 'post',
+                    'status'           => $data['status'] ?? 'draft',
+                    'published_at'     => $data['published_at'] ?? null,
+                    'scheduled_at'     => $data['scheduled_at'] ?? null,
+                    'meta_title'       => $data['meta_title'] ?? null,
+                    'meta_description' => $data['meta_description'] ?? null,
+                    'meta_keywords'    => $data['meta_keywords'] ?? null,
+                    'canonical_url'    => $data['canonical_url'] ?? null,
+                    'og_title'         => $data['og_title'] ?? null,
+                    'og_description'   => $data['og_description'] ?? null,
+                    'twitter_card'     => $data['twitter_card'] ?? 'summary_large_image',
+                    'is_indexable'     => $data['is_indexable'] ?? true,
+                    'is_followable'    => $data['is_followable'] ?? true,
+                    'schema_markup'    => $data['schema_markup'] ?? null,
                 ]);
 
+                // آپلود تصویر شاخص
                 if ($request->hasFile('featured_image')) {
                     $this->mediaService->uploadFeatured($post, $request->file('featured_image'));
                 }
 
+                // آپلود گالری
                 if ($request->hasFile('gallery')) {
                     $this->mediaService->uploadGallery($post, $request->file('gallery'));
                 }
 
+                // آپلود OG
                 if ($request->hasFile('og_image')) {
                     $media = $post->addMediaFromRequest('og_image')
                         ->toMediaCollection('og_image');
                     $post->update(['og_image' => $media->getUrl()]);
                 }
 
-                if ($request->filled('tags')) {
-                    $post->tags()->sync($request->tags);
+                // برچسب‌ها
+                if (!empty($data['tags'])) {
+                    $post->tags()->sync($data['tags']);
                 }
 
                 return $post;
@@ -167,26 +185,53 @@ class PostController extends Controller
      */
     public function update(UpdatePostRequest $request, Post $post)
     {
-        $this->authorize('update', $post);
+        $user = $request->user();
+
+        if (!$user) {
+            return $this->errorResponse('ابتدا وارد حساب خود شوید', 401);
+        }
+
+        // چک مجوز
+        if ($user->getKey() !== $post->getAttribute('user_id')
+            && !$user->hasAnyRole(['admin', 'editor'])) {
+            return $this->errorResponse('شما مجاز به ویرایش این مقاله نیستید', 403);
+        }
 
         try {
             DB::transaction(function () use ($request, $post) {
-                $post->update($request->only([
-                    'title', 'content', 'excerpt', 'category_id', 'type', 'status',
-                    'published_at', 'scheduled_at',
-                    'meta_title', 'meta_description', 'meta_keywords', 'canonical_url',
-                    'og_title', 'og_description', 'twitter_card',
-                    'is_indexable', 'is_followable', 'schema_markup',
-                ]));
+                $data = $request->validated();
 
+                $post->update(array_filter([
+                    'title'            => $data['title'] ?? null,
+                    'content'          => $data['content'] ?? null,
+                    'excerpt'          => $data['excerpt'] ?? null,
+                    'category_id'      => $data['category_id'] ?? null,
+                    'type'             => $data['type'] ?? null,
+                    'status'           => $data['status'] ?? null,
+                    'published_at'     => $data['published_at'] ?? null,
+                    'scheduled_at'     => $data['scheduled_at'] ?? null,
+                    'meta_title'       => $data['meta_title'] ?? null,
+                    'meta_description' => $data['meta_description'] ?? null,
+                    'meta_keywords'    => $data['meta_keywords'] ?? null,
+                    'canonical_url'    => $data['canonical_url'] ?? null,
+                    'og_title'         => $data['og_title'] ?? null,
+                    'og_description'   => $data['og_description'] ?? null,
+                    'twitter_card'     => $data['twitter_card'] ?? null,
+                    'is_indexable'     => $data['is_indexable'] ?? null,
+                    'is_followable'    => $data['is_followable'] ?? null,
+                    'schema_markup'    => $data['schema_markup'] ?? null,
+                ], fn($v) => !is_null($v)));
+
+                // تصویر
                 if ($request->boolean('remove_featured')) {
                     $this->mediaService->clearCollection($post, 'featured');
                 } elseif ($request->hasFile('featured_image')) {
                     $this->mediaService->uploadFeatured($post, $request->file('featured_image'));
                 }
 
+                // گالری
                 if ($request->filled('remove_gallery')) {
-                    foreach ($request->remove_gallery as $mediaId) {
+                    foreach ($request->input('remove_gallery') as $mediaId) {
                         $media = $post->media()->find($mediaId);
                         $media?->delete();
                     }
@@ -196,15 +241,9 @@ class PostController extends Controller
                     $this->mediaService->uploadGallery($post, $request->file('gallery'));
                 }
 
-                if ($request->hasFile('og_image')) {
-                    $post->clearMediaCollection('og_image');
-                    $media = $post->addMediaFromRequest('og_image')
-                        ->toMediaCollection('og_image');
-                    $post->update(['og_image' => $media->getUrl()]);
-                }
-
-                if ($request->has('tags')) {
-                    $post->tags()->sync($request->tags ?? []);
+                // برچسب‌ها
+                if (isset($data['tags'])) {
+                    $post->tags()->sync($data['tags'] ?? []);
                 }
             });
 
@@ -223,9 +262,18 @@ class PostController extends Controller
     /**
      * حذف مقاله
      */
-    public function destroy(Post $post)
+    public function destroy(Request $request, Post $post)
     {
-        $this->authorize('delete', $post);
+        $user = $request->user();
+
+        if (!$user) {
+            return $this->errorResponse('ابتدا وارد حساب خود شوید', 401);
+        }
+
+        if ($user->getKey() !== $post->getAttribute('user_id')
+            && !$user->hasAnyRole(['admin', 'editor'])) {
+            return $this->errorResponse('شما مجاز به حذف این مقاله نیستید', 403);
+        }
 
         $post->delete();
 
@@ -237,12 +285,18 @@ class PostController extends Controller
      */
     public function myPosts(Request $request)
     {
-        $query = Post::where('user_id', $request->user()->id)
+        $user = $request->user();
+
+        if (!$user) {
+            return $this->errorResponse('ابتدا وارد حساب خود شوید', 401);
+        }
+
+        $query = Post::where('user_id', $user->getKey())
             ->with(['category', 'tags'])
             ->latest();
 
         if ($request->filled('status')) {
-            $query->where('status', $request->status);
+            $query->where('status', $request->input('status'));
         }
 
         $posts = $query->paginate(min((int) $request->input('per_page', 15), 50));

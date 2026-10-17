@@ -3,63 +3,96 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\V1\Tag\StoreTagRequest;
+use App\Http\Requests\Api\V1\Tag\UpdateTagRequest;
+use App\Http\Resources\Api\V1\TagResource;
+use App\Models\Tag;
+use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
 
 class TagController extends Controller
 {
+    use ApiResponse;
+
     /**
-     * Display a listing of the resource.
+     * لیست برچسب‌ها
+     * GET /api/v1/tags
      */
-    public function index()
+    public function index(Request $request)
     {
-        //
+        $query = Tag::query()->withCount('posts');
+
+        if ($request->filled('search')) {
+            $query->where('name', 'LIKE', "%{$request->search}%");
+        }
+
+        $sort = $request->input('sort', 'popular');
+        match ($sort) {
+            'newest'  => $query->latest(),
+            'name'    => $query->orderBy('name'),
+            default   => $query->orderByDesc('usage_count'),
+        };
+
+        $perPage = min((int) $request->input('per_page', 30), 100);
+        $tags = $query->paginate($perPage);
+
+        return $this->paginatedResponse($tags, TagResource::class);
     }
 
     /**
-     * Show the form for creating a new resource.
+     * نمایش یک برچسب
+     * GET /api/v1/tags/{slug}
      */
-    public function create()
+    public function show(Tag $tag)
     {
-        //
+        $tag->load(['posts' => function ($q) {
+            $q->published()->latest('published_at')->limit(10);
+        }]);
+
+        return $this->successResponse(
+            new TagResource($tag),
+            'جزئیات برچسب'
+        );
     }
 
     /**
-     * Store a newly created resource in storage.
+     * ساخت برچسب (ادمین/ادیتور)
+     * POST /api/v1/tags
      */
-    public function store(Request $request)
+    public function store(StoreTagRequest $request)
     {
-        //
+        $tag = Tag::create($request->validated());
+
+        return $this->successResponse(
+            new TagResource($tag),
+            'برچسب با موفقیت ساخته شد',
+            201
+        );
     }
 
     /**
-     * Display the specified resource.
+     * ویرایش برچسب
+     * PUT /api/v1/tags/{tag}
      */
-    public function show(string $id)
+    public function update(UpdateTagRequest $request, Tag $tag)
     {
-        //
+        $tag->update($request->validated());
+
+        return $this->successResponse(
+            new TagResource($tag->fresh()),
+            'برچسب با موفقیت ویرایش شد'
+        );
     }
 
     /**
-     * Show the form for editing the specified resource.
+     * حذف برچسب
+     * DELETE /api/v1/tags/{tag}
      */
-    public function edit(string $id)
+    public function destroy(Tag $tag)
     {
-        //
-    }
+        $tag->posts()->detach();
+        $tag->delete();
 
-    /**
-     * Update the specified resource in storage.
-     */
-    public function update(Request $request, string $id)
-    {
-        //
-    }
-
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy(string $id)
-    {
-        //
+        return $this->noContentResponse('برچسب با موفقیت حذف شد');
     }
 }
