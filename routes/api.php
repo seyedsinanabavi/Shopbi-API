@@ -13,9 +13,9 @@ Route::prefix('v1')->group(function () {
 
     // ==================== Auth (عمومی) ====================
     Route::prefix('auth')->group(function () {
-        Route::post('send-otp',   [AuthController::class, 'sendOtp'])->middleware('throttle:5,1');
-        Route::post('verify-otp', [AuthController::class, 'verifyOtp'])->middleware('throttle:10,1');
-        Route::post('register',   [AuthController::class, 'register'])->middleware('throttle:5,1');
+        Route::post('send-otp',   [AuthController::class, 'sendOtp'])->middleware('throttle:otp');
+        Route::post('verify-otp', [AuthController::class, 'verifyOtp'])->middleware('throttle:auth');
+        Route::post('register',   [AuthController::class, 'register'])->middleware('throttle:auth');
     });
 
     // ==================== Auth (نیاز به لاگین) ====================

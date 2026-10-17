@@ -14,17 +14,19 @@ return Application::configure(basePath: dirname(__DIR__))
         apiPrefix: 'api',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // Sanctum برای SPA
+        // ==================== Sanctum + Rate Limiting ====================
         $middleware->api(prepend: [
             \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
+            'throttle:api',
         ]);
 
-        // Redirect Middleware برای SEO (روی web)
+        // ==================== Redirect + Security Headers ====================
         $middleware->web(append: [
             \App\Http\Middleware\RedirectMiddleware::class,
+            \App\Http\Middleware\SecurityHeaders::class,
         ]);
 
-        // Aliasها
+        // ==================== Aliasها ====================
         $middleware->alias([
             'role'               => \Spatie\Permission\Middleware\RoleMiddleware::class,
             'permission'         => \Spatie\Permission\Middleware\PermissionMiddleware::class,
